@@ -1,0 +1,37 @@
+{
+  "name": "ai-ruleset-generator",
+  "version": "1.0.0",
+  "description": "AI Ruleset Generator - Start all services with one command",
+  "scripts": {
+    "start": "node scripts/start-all.js",
+    "stop": "node scripts/stop-all.js",
+    "status": "node scripts/check-status.js",
+    "setup": "node scripts/setup.js",
+    "dev": "concurrently \"npm run start:backend\" \"npm run start:frontend\" \"npm run start:ollama\"",
+    "start:backend": "cd backend && python -m uvicorn main:app --host 127.0.0.1 --port 8001 --reload",
+    "start:frontend": "cd frontend && npm start",
+    "start:ollama": "ollama serve",
+    "install:all": "npm run install:frontend && npm run install:backend",
+    "install:frontend": "cd frontend && npm install",
+    "install:backend": "cd backend && pip install -r requirements.txt",
+    "build": "cd frontend && npm run build"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0",
+    "cross-spawn": "^7.0.3"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "python": ">=3.8.0"
+  },
+  "keywords": [
+    "ai",
+    "ruleset",
+    "ollama",
+    "fastapi",
+    "react",
+    "generator"
+  ],
+  "author": "AI Ruleset Generator",
+  "license": "MIT"
+}
