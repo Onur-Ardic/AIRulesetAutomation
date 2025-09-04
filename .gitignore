@@ -77,6 +77,9 @@ logs
 .env.test.local
 .env.production.local
 
+# Vercel
+.vercel
+
 # Temporary folders
 tmp/
 temp/

@@ -3,6 +3,7 @@ import axios from 'axios';
 import ProjectForm from './components/ProjectForm';
 import RulesetDisplay from './components/RulesetDisplay';
 import LoadingSpinner from './components/LoadingSpinner';
+import API_BASE_URL from './config/api';
 import './App.css';
 
 function App() {
@@ -15,7 +16,7 @@ function App() {
   useEffect(() => {
     const checkApiStatus = async () => {
       try {
-        const response = await axios.get('http://localhost:8001/health');
+        const response = await axios.get(`${API_BASE_URL}/health`);
         setApiStatus(response.data);
       } catch (err) {
         console.error('API status check failed:', err);
@@ -30,7 +31,7 @@ function App() {
     setError(null);
     
     try {
-      const response = await axios.post('http://localhost:8001/generate-ruleset', projectData);
+      const response = await axios.post(`${API_BASE_URL}/generate-ruleset`, projectData);
       setRuleset(response.data);
     } catch (err) {
       setError(err.response?.data?.detail || 'Bir hata oluştu');
