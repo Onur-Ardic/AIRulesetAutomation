@@ -4,15 +4,17 @@ import sys
 import os
 
 # Backend klasörünü path'e ekle
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'backend'))
+backend_path = os.path.join(os.path.dirname(__file__), '..', 'backend')
+sys.path.insert(0, backend_path)
 
-from backend.app.core.config import settings
-from backend.app.routers.main import router
+# Backend modüllerini import et
+from app.core.config import settings
+from app.routers.main import router
 
 app = FastAPI(
-    title=settings.PROJECT_NAME,
-    description=settings.PROJECT_DESCRIPTION,
-    version=settings.VERSION
+    title="AI Ruleset Generator",
+    description="AI-powered development ruleset generator",
+    version="1.0.0"
 )
 
 # CORS middleware ekle
@@ -25,8 +27,7 @@ app.add_middleware(
 )
 
 # Router'ları dahil et
-app.include_router(router, prefix="/api")
+app.include_router(router)
 
-# Vercel handler
-def handler(request):
-    return app(request)
+# Vercel için handler function
+handler = app
