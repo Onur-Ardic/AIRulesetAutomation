@@ -7,3 +7,4 @@ openai==1.3.8
 requests==2.31.0
 python-multipart==0.0.6
 fastapi-cors
+google-generativeai>=0.3.0

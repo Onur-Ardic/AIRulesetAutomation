@@ -8,6 +8,7 @@ import openai
 import json
 import requests
 from datetime import datetime
+import google.generativeai as genai
 
 # Load environment variables
 load_dotenv()
@@ -62,14 +63,19 @@ class RulesetResponse(BaseModel):
     json_data: Dict[str, Any]
 
 # AI Provider configuration
-AI_PROVIDER = os.getenv("AI_PROVIDER", "ollama")  # "openai", "ollama", "huggingface"
+AI_PROVIDER = os.getenv("AI_PROVIDER", "gemini")  # "openai", "ollama", "huggingface", "gemini"
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
 HUGGINGFACE_API_KEY = os.getenv("HUGGINGFACE_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
-# Initialize OpenAI client (if using OpenAI)
+# Initialize AI clients
 if AI_PROVIDER == "openai":
     openai.api_key = os.getenv("OPENAI_API_KEY")
+elif AI_PROVIDER == "gemini":
+    if GEMINI_API_KEY:
+        genai.configure(api_key=GEMINI_API_KEY)
 
 def generate_ruleset_prompt(project_info: ProjectInfo) -> str:
     """Generate a detailed prompt for the AI to create a ruleset based on project category"""
@@ -325,6 +331,8 @@ async def call_ai_api(prompt: str) -> str:
         return await call_ollama_api(prompt)
     elif AI_PROVIDER == "huggingface":
         return await call_huggingface_api(prompt)
+    elif AI_PROVIDER == "gemini":
+        return await call_gemini_api(prompt)
     else:
         raise HTTPException(status_code=500, detail=f"Unsupported AI provider: {AI_PROVIDER}")
 
@@ -419,6 +427,72 @@ async def call_huggingface_api(prompt: str) -> str:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Hugging Face API error: {str(e)}")
 
+async def call_gemini_api(prompt: str) -> str:
+    """Call Google Gemini API to generate ruleset"""
+    try:
+        if not GEMINI_API_KEY:
+            raise HTTPException(
+                status_code=500, 
+                detail="Gemini API key bulunamadı. GEMINI_API_KEY environment variable'ını ayarlayın."
+            )
+        
+        # Initialize Gemini model
+        model = genai.GenerativeModel(GEMINI_MODEL)
+        
+        # System instruction for better responses
+        system_instruction = """Sen uzman bir yazılım mimarı ve teknik yazar olarak, AI kodlama asistanları için kapsamlı geliştirme rehberleri oluşturma konusunda uzmanlaşmışsın. 
+
+Görevin:
+- Detaylı, uygulanabilir ve açık rehberler yazmak
+- Türkçe dilinde profesyonel içerik üretmek
+- Modern best practice'leri kullanmak
+- AI asistanların anlayabileceği net talimatlar vermek
+- Kod örnekleri ve pratik uygulamalar eklemek
+
+Lütfen markdown formatında, düzenli başlıklar ve madde işaretleri ile yapılandırılmış bir rehber oluştur."""
+
+        # Prepare the full prompt
+        full_prompt = f"{system_instruction}\n\n{prompt}"
+        
+        # Generate content
+        response = model.generate_content(
+            full_prompt,
+            generation_config=genai.types.GenerationConfig(
+                temperature=0.7,
+                top_p=0.9,
+                top_k=40,
+                max_output_tokens=4000,
+            )
+        )
+        
+        if response.text:
+            return response.text
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail="Gemini API'den boş yanıt alındı"
+            )
+            
+    except Exception as e:
+        # Handle specific Gemini errors
+        if "API_KEY_INVALID" in str(e):
+            raise HTTPException(
+                status_code=401,
+                detail="Geçersiz Gemini API key. Lütfen doğru API key'i kontrol edin."
+            )
+        elif "QUOTA_EXCEEDED" in str(e):
+            raise HTTPException(
+                status_code=429,
+                detail="Gemini API quota'sı aşıldı. Lütfen daha sonra tekrar deneyin."
+            )
+        elif "SAFETY" in str(e):
+            raise HTTPException(
+                status_code=400,
+                detail="İçerik güvenlik filtresi tarafından engellendi. Lütfen daha uygun bir prompt deneyin."
+            )
+        else:
+            raise HTTPException(status_code=500, detail=f"Gemini API error: {str(e)}")
+
 def markdown_to_json(markdown_content: str, project_info: ProjectInfo) -> Dict[str, Any]:
     """Convert markdown ruleset to structured JSON"""
     
@@ -463,24 +537,51 @@ async def root():
 @app.get("/health")
 async def health_check():
     ai_status = "unknown"
+    additional_info = {}
     
     if AI_PROVIDER == "ollama":
         try:
             response = requests.get(f"{OLLAMA_BASE_URL}/api/tags", timeout=5)
             ai_status = "connected" if response.status_code == 200 else "disconnected"
+            additional_info = {
+                "ollama_url": OLLAMA_BASE_URL,
+                "ollama_model": OLLAMA_MODEL
+            }
         except:
             ai_status = "disconnected"
+            additional_info = {
+                "ollama_url": OLLAMA_BASE_URL,
+                "ollama_model": OLLAMA_MODEL
+            }
     elif AI_PROVIDER == "openai":
         ai_status = "configured" if os.getenv("OPENAI_API_KEY") else "not_configured"
     elif AI_PROVIDER == "huggingface":
         ai_status = "configured" if os.getenv("HUGGINGFACE_API_KEY") else "not_configured"
+    elif AI_PROVIDER == "gemini":
+        ai_status = "configured" if GEMINI_API_KEY else "not_configured"
+        additional_info = {
+            "gemini_model": GEMINI_MODEL
+        }
+        
+        # Test Gemini API connection if configured
+        if ai_status == "configured":
+            try:
+                # Simple test to check if API key works
+                model = genai.GenerativeModel('gemini-pro')
+                test_response = model.generate_content("Test", 
+                    generation_config=genai.types.GenerationConfig(max_output_tokens=10))
+                ai_status = "connected" if test_response else "api_error"
+            except Exception as e:
+                if "API_KEY_INVALID" in str(e):
+                    ai_status = "invalid_api_key"
+                else:
+                    ai_status = "connection_error"
     
     return {
         "status": "healthy",
         "ai_provider": AI_PROVIDER,
         "ai_status": ai_status,
-        "ollama_url": OLLAMA_BASE_URL if AI_PROVIDER == "ollama" else None,
-        "ollama_model": OLLAMA_MODEL if AI_PROVIDER == "ollama" else None
+        **additional_info
     }
 
 @app.post("/generate-ruleset", response_model=RulesetResponse)
@@ -546,6 +647,79 @@ async def get_frameworks():
         "frontend_frameworks": ["React", "Vue.js", "Angular", "Svelte", "Next.js", "Nuxt.js", "Vanilla JS"],
         "databases": ["PostgreSQL", "MySQL", "MongoDB", "Redis", "SQLite", "Firebase", "Supabase"],
         "deployment_platforms": ["AWS", "Google Cloud", "Azure", "Vercel", "Netlify", "Heroku", "Docker", "Railway"]
+    }
+
+@app.post("/test-gemini")
+async def test_gemini_connection():
+    """Test Gemini AI API connection and model response"""
+    if AI_PROVIDER != "gemini":
+        raise HTTPException(
+            status_code=400,
+            detail="AI provider 'gemini' olarak ayarlanmalı. Şu anki provider: " + AI_PROVIDER
+        )
+    
+    if not GEMINI_API_KEY:
+        raise HTTPException(
+            status_code=400,
+            detail="GEMINI_API_KEY environment variable ayarlanmalı"
+        )
+    
+    try:
+        test_prompt = "Python FastAPI için basit bir Hello World örneği oluştur."
+        result = await call_gemini_api(test_prompt)
+        
+        return {
+            "status": "success",
+            "model_used": GEMINI_MODEL,
+            "test_prompt": test_prompt,
+            "response_preview": result[:200] + "..." if len(result) > 200 else result,
+            "full_response_length": len(result)
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Gemini test başarısız: {str(e)}"
+        )
+
+@app.get("/gemini-models")
+async def get_gemini_models():
+    """Get available Gemini models and their configurations"""
+    return {
+        "current_model": GEMINI_MODEL,
+        "available_models": {
+            "gemini-1.5-flash": {
+                "name": "Gemini 1.5 Flash",
+                "description": "Hızlı ve verimli, günlük kullanım için ideal",
+                "best_for": "Hızlı yanıtlar, basit görevler",
+                "max_tokens": 8192,
+                "cost": "Düşük"
+            },
+            "gemini-1.5-pro": {
+                "name": "Gemini 1.5 Pro", 
+                "description": "Yüksek kaliteli, karmaşık görevler için",
+                "best_for": "Kod generation, teknik rehberler, analiz",
+                "max_tokens": 32768,
+                "cost": "Orta"
+            },
+            "gemini-pro": {
+                "name": "Gemini Pro",
+                "description": "Dengeli performans ve kalite",
+                "best_for": "Genel amaçlı kullanım",
+                "max_tokens": 4096,
+                "cost": "Orta"
+            }
+        },
+        "setup_instructions": {
+            "step1": "https://makersuite.google.com/app/apikey adresinden API key alın",
+            "step2": "GEMINI_API_KEY environment variable'ını ayarlayın",
+            "step3": "GEMINI_MODEL ile model seçin (opsiyonel)",
+            "step4": "AI_PROVIDER=gemini olarak ayarlayın"
+        },
+        "rate_limits": {
+            "free_tier": "15 request/minute",
+            "paid_tier": "1000 request/minute",
+            "note": "Ücretsiz tier günlük limit var"
+        }
     }
 
 if __name__ == "__main__":
